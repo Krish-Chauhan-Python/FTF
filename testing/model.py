@@ -118,7 +118,7 @@ import torch.nn.functional as F
 class CNNRegressor(nn.Module):
     def __init__(self, 
                  in_channels=3, 
-                 conv_layers=6, 
+                 conv_layers=12, 
                  hidden_dim=512, 
                  fc_layers=3,
                  num_filters_start=32, 
@@ -240,7 +240,7 @@ def collect_dataset_paths(root_dir, skip_ratio=0.5):
 # Main Execution
 # ==========================
 if __name__ == "__main__":
-    root_dir = os.getenv('dataset_path')
+    root_dir = r"C:\Users\Hi Krish\Downloads\RH20T_cfg1\Chemistry"
 
     # Skip half the folders
     skip_ratio = 0.5
