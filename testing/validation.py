@@ -21,11 +21,11 @@ pred = df[pred_col].to_numpy()
 
 err = pred - actual
 abs_err = np.abs(err)
-pct_err = err / np.where(actual != 0, actual, 1) * 100.0
+pct_err = np.abs(err / np.where(actual != 0, actual, 1) * 100.0)
 
 # --- Outlier removal on percentage error ---
 # IQR method: keep values within [Q1 - k*IQR, Q3 + k*IQR]
-k = 1.5  # adjust: smaller = more aggressive trimming
+k = 1  # adjust: smaller = more aggressive trimming
 q1 = np.percentile(pct_err, 25)
 q3 = np.percentile(pct_err, 75)
 iqr = q3 - q1
@@ -44,30 +44,17 @@ abs_err_f = np.abs(err_f)
 pct_err_f = pct_err[mask]
 
 # recompute metrics on filtered data
-rmse = mean_squared_error(actual_f, pred_f)
+rmse = np.sqrt(mean_squared_error(actual_f, pred_f))  # Fixed: use sqrt for RMSE
 mae = mean_absolute_error(actual_f, pred_f)
 mean_pct_error = np.mean(pct_err_f)
 mean_abs_pct_error = np.mean(np.abs(pct_err_f))
 
 print(f"Filtered RMSE: {rmse:.4f}, MAE: {mae:.4f}")
-print(f"Filtered mean % error: {mean_pct_error:.2f}%")
-print(f"Filtered mean absolute % error: {mean_abs_pct_error:.2f}%")
+
 
 x = np.arange(len(pct_err_f))
 
-# 1) Percentage error figure
-plt.figure(figsize=(10, 4))
-plt.plot(x, pct_err_f, label="Percentage Error (%)")
-plt.xlabel("Sample index (filtered)")
-plt.ylabel("% Error")
-plt.title(
-    f"Percentage Error for {pred_col}\n"
-    f"Mean abs % error (filtered) = {mean_abs_pct_error:.2f}%"
-)
-plt.grid(True)
-plt.ylim(-100, 100)  # optional visualization limit
-plt.tight_layout()
-plt.show()
+
 
 # 2) Absolute error figure
 plt.figure(figsize=(10, 4))
@@ -90,3 +77,24 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.show()
+
+# 4) NEW: High Error Indicator (>200% error)
+plt.figure(figsize=(12, 4))
+high_error_mask = pct_err_f > 200  # True if % error > 200%
+plt.plot(x, high_error_mask.astype(int), marker='o', markersize=4, linewidth=2, 
+         label="High Error", color='red', alpha=0.8)
+plt.xlabel("Sample index (filtered)")
+plt.ylabel("High Error Flag")
+plt.title(f"High Error Detectionfor {pred_col}\n"
+          f"High error samples: {high_error_mask.sum()}/{len(high_error_mask)} ({100*high_error_mask.mean():.1f}%)")
+plt.grid(True, alpha=0.3)
+plt.yticks([0, 1], ['False', 'True'])
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Print summary
+print(f"\nHigh error (>200%) summary for {pred_col}:")
+print(f"  Total high error samples: {high_error_mask.sum()}")
+print(f"  Percentage: {100*high_error_mask.mean():.1f}%")
+print(f"  High error indices (first 10): {np.where(high_error_mask)[0][:10]}")

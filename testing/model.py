@@ -97,13 +97,15 @@ class TorqueImageDataset(Dataset):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         cap.release()
+        cv2.destroyAllWindows() 
         if not ret:
             raise RuntimeError(f"Failed to read frame {frame_idx} from {video_path}")
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_tensor = torch.from_numpy(frame_rgb).permute(2, 0, 1).float() / 255.0  # HWC → CHW and normalize to [0,1]
         if self.transform:
-            frame_rgb = self.transform(frame_rgb)
-        return frame_rgb, torch.tensor(target, dtype=torch.float32)
+            frame_tensor = self.transform(frame_tensor)
+        return frame_tensor, torch.tensor(target, dtype=torch.float32)
 
 
 # ==========================
@@ -116,11 +118,11 @@ import torch.nn.functional as F
 class CNNRegressor(nn.Module):
     def __init__(self, 
                  in_channels=3, 
-                 conv_layers=3, 
-                 hidden_dim=128, 
-                 fc_layers=2, 
+                 conv_layers=6, 
+                 hidden_dim=512, 
+                 fc_layers=3,
                  num_filters_start=32, 
-                 kernel_size=3, 
+                 kernel_size=2, 
                  output_dim=1):
         """
         Parameters:
@@ -167,15 +169,16 @@ class CNNRegressor(nn.Module):
         self.fc_layers = nn.Sequential(*fc_blocks)
 
     def forward(self, x):
-        # Convolutional feature extraction
         x = self.conv(x)
         x = torch.flatten(x, 1)
 
-        # Lazy init of the first FC layer based on flattened size
         if self.flatten_dim is None:
             self.flatten_dim = x.shape[1]
             print(f"[INFO] Flattened feature size: {self.flatten_dim}")
+            # Initialize FC layers dynamically
             self._initialize_fc_layers(self.flatten_dim)
+            # Move to same device as input
+            self.fc_layers = self.fc_layers.to(x.device)
 
         x = self.fc_layers(x)
         return x
@@ -196,10 +199,9 @@ class CNNRegressor(nn.Module):
 # ==========================
 print("[INFO] Setting up image transforms...")
 transform = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
+    transforms.ConvertImageDtype(torch.float32),
+    transforms.Resize((420,420), antialias=True),
+    transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]),
 ])
 
 
@@ -238,7 +240,7 @@ def collect_dataset_paths(root_dir, skip_ratio=0.5):
 # Main Execution
 # ==========================
 if __name__ == "__main__":
-    root_dir = r"C:\Users\Hi Krish\Downloads\RH20T_cfg1\RH20T_cfg1"
+    root_dir = os.getenv('dataset_path')
 
     # Skip half the folders
     skip_ratio = 0.5
@@ -264,8 +266,9 @@ if __name__ == "__main__":
     print(f"[INFO] Train/Val split: {len(train_data)} / {len(val_data)} frames")
 
     print("[INFO] Creating DataLoaders...")
-    train_loader = DataLoader(train_data, batch_size=8, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_data, batch_size=8, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_data, batch_size=16, shuffle=True, num_workers=0, pin_memory=True)
+    val_loader = DataLoader(val_data, batch_size=16, shuffle=False, num_workers=0, pin_memory=True)
+
     print("[INFO] DataLoaders ready!")
 
     # ==========================
@@ -273,11 +276,11 @@ if __name__ == "__main__":
     # ==========================
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n[INFO] Using device: {device}")
-    model = CNNRegressor(conv_layers=5, fc_layers=3, hidden_dim=256, num_filters_start=32).to(device)
+    model = CNNRegressor().to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-    num_epochs = 10
+    num_epochs = 15
     print("\n[INFO] Starting training loop...")
     for epoch in range(num_epochs):
         model.train()

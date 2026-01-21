@@ -2,7 +2,7 @@ import os
 import shutil
 
 # Change this path to where your folders are located
-base_dir = "C:/Users/Hi Krish/Downloads/RH20T_cfg1/RH20T_cfg1"
+base_dir = "C:/Users/Hi Krish/Downloads/RH20T_cfg3/RH20T_cfg3"
 
 # Walk through the directory tree
 for root, dirs, files in os.walk(base_dir, topdown=False):
