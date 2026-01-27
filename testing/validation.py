@@ -2,99 +2,174 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.ndimage import uniform_filter1d
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-results_file = "validation_results.csv"
-if not os.path.exists(results_file):
-    raise FileNotFoundError(f"{results_file} not found. Run the training script first.")
+# 5 CSVs (EffNet is the first one)
+csv_paths = [
+    r'C:\Users\Hi Krish\Desktop\Coding\Python\FTF\Efficientnet based\validation_predictions.csv',
+    r'C:\Users\Hi Krish\Desktop\Coding\Python\FTF\in_channels=3,conv_layers=6,hidden_dim=512,fc_layers=3,num_filters_start=32,kernel_size=2,output_dim=1)\validation_results.csv',
+    r'C:\Users\Hi Krish\Desktop\Coding\Python\FTF\in_channels=3,conv_layers=8,hidden_dim=1024,fc_layers=2,num_filters_start=32,kernel_size=2,output_dim=1\validation_results.csv',
+    r'C:\Users\Hi Krish\Desktop\Coding\Python\FTF\resnetbased 3 epoc\validation_predictions_optimized.csv',
+    r'C:\Users\Hi Krish\Desktop\Coding\Python\FTF\resnetbased 25 epocs\validation_predictions.csv'
+]
 
-df = pd.read_csv(results_file)
-print(df)
+model_names = [
+    "EffNet base",
+    "CNN cfg1",
+    "CNN cfg2",
+    "ResNet 3e",
+    "ResNet 25e"
+]
 
-actual = df["actual"].to_numpy()
-pred_cols = [c for c in df.columns if c.startswith("prediction_")]
-if not pred_cols:
-    raise ValueError("No prediction_ columns found in validation_results.csv")
+# -------- helper functions (from single‑file code, generalized) --------
+def iqr_mask(pct_err, k=1.0):
+    """Return boolean mask keeping points within IQR band."""
+    q1 = np.percentile(pct_err, 25)
+    q3 = np.percentile(pct_err, 75)
+    iqr = q3 - q1
+    lower = q1 - k * iqr
+    upper = q3 + k * iqr
+    return (pct_err >= lower) & (pct_err <= upper)
 
-pred_col = pred_cols[-1]
-pred = df[pred_col].to_numpy()
+def smooth_series(arr, win=35):
+    arr = np.asarray(arr, dtype=float)
+    if len(arr) > win:
+        return uniform_filter1d(arr, size=win, mode="nearest")
+    return arr
 
-err = pred - actual
-abs_err = np.abs(err)
-pct_err = np.abs(err / np.where(actual != 0, actual, 1) * 100.0)
+# -------- load all models, apply same formulas --------
+all_abs_curves = []
+all_rmse_curves = []
+all_pct_curves = []
+metrics = []  # (rmse, mae, mean_pct_error, mean_abs_pct_error)
 
-# --- Outlier removal on percentage error ---
-# IQR method: keep values within [Q1 - k*IQR, Q3 + k*IQR]
-k = 1  # adjust: smaller = more aggressive trimming
-q1 = np.percentile(pct_err, 25)
-q3 = np.percentile(pct_err, 75)
-iqr = q3 - q1
-lower = q1 - k * iqr
-upper = q3 + k * iqr
+for path in csv_paths:
+    try:
+        df = pd.read_csv(path)
 
-mask = (pct_err >= lower) & (pct_err <= upper)
+        actual = df["actual"].to_numpy(dtype=float)
+        # allow either "predicted" or "prediction_0"
+        if "predicted" in df.columns:
+            pred = df["predicted"].to_numpy(dtype=float)
+        else:
+            pred_cols = [c for c in df.columns if c.startswith("prediction_")]
+            if not pred_cols:
+                raise ValueError(f"No predicted column in {path}")
+            pred = df[pred_cols[-1]].to_numpy(dtype=float)
 
-print(f"Original samples: {len(pct_err)}, kept after outlier removal: {mask.sum()}")
+        err = pred - actual
+        abs_err = np.abs(err)
+        pct_err = np.abs(err / np.where(actual != 0, actual, 1) * 100.0)
 
-# filtered arrays
-actual_f = actual[mask]
-pred_f   = pred[mask]
-err_f    = err[mask]
-abs_err_f = np.abs(err_f)
-pct_err_f = pct_err[mask]
+        # IQR‑based outlier removal on percentage error (same as your script)
+        mask = iqr_mask(pct_err, k=1.0)
 
-# recompute metrics on filtered data
-rmse = np.sqrt(mean_squared_error(actual_f, pred_f))  # Fixed: use sqrt for RMSE
-mae = mean_absolute_error(actual_f, pred_f)
-mean_pct_error = np.mean(pct_err_f)
-mean_abs_pct_error = np.mean(np.abs(pct_err_f))
+        actual_f   = actual[mask]
+        pred_f     = pred[mask]
+        err_f      = err[mask]
+        abs_err_f  = abs_err[mask]
+        pct_err_f  = pct_err[mask]
 
-print(f"Filtered RMSE: {rmse:.4f}, MAE: {mae:.4f}")
+        # global metrics on filtered data
+        rmse = np.sqrt(mean_squared_error(actual_f, pred_f))
+        mae  = mean_absolute_error(actual_f, pred_f)
+        mean_pct_error     = np.mean(pct_err_f)
+        mean_abs_pct_error = np.mean(np.abs(pct_err_f))
+        metrics.append((rmse, mae, mean_pct_error, mean_abs_pct_error))
 
+        # smoothed curves for plotting
+        abs_curve  = smooth_series(abs_err_f, win=35)
+        sq_curve   = smooth_series(err_f ** 2, win=35)
+        rmse_curve = np.sqrt(sq_curve)
+        pct_curve  = smooth_series(pct_err_f, win=35)
 
-x = np.arange(len(pct_err_f))
+        all_abs_curves.append(abs_curve)
+        all_rmse_curves.append(rmse_curve)
+        all_pct_curves.append(pct_curve)
 
+        print(f"{os.path.basename(path)} -> kept {mask.sum()}/{len(mask)} after IQR")
 
+    except Exception as e:
+        print(f"Error loading {path}: {e}")
+        all_abs_curves.append(None)
+        all_rmse_curves.append(None)
+        all_pct_curves.append(None)
+        metrics.append((None, None, None, None))
 
-# 2) Absolute error figure
-plt.figure(figsize=(10, 4))
-plt.plot(x, abs_err_f, label="Absolute Error")
-plt.xlabel("Sample index (filtered)")
-plt.ylabel("Absolute Error")
-plt.title(f"Absolute Error for {pred_col} (outliers removed)")
-plt.grid(True)
+# align lengths
+valid_lengths = [len(c) for c in all_abs_curves if c is not None]
+common_len = min(valid_lengths)
+x = np.arange(common_len)
+
+colors = plt.cm.tab10(np.linspace(0, 1, len(model_names)))
+eff_name = "EffNet base"
+
+def is_effnet(name):
+    return name == eff_name
+
+# ---------- Figure 1: absolute error (EffNet highlighted) ----------
+plt.figure(figsize=(12, 6))
+for i, (name, curve, m) in enumerate(zip(model_names, all_abs_curves, metrics)):
+    if curve is None:
+        continue
+    rmse, mae, mean_pct, mean_abs_pct = m
+    y = curve[:common_len]
+    label = f"{name} (RMSE={rmse:.4f}, MAE={mae:.4f}, %MAE={mean_abs_pct:.2f}%)"
+
+    if is_effnet(name):
+        plt.plot(x, y, color="tab:red", linewidth=2.5,
+                 label=label + "  <-- EffNet", zorder=3)
+    else:
+        plt.plot(x, y, color=colors[i], linewidth=1.2, alpha=0.35,
+                 label=label, zorder=1)
+
+plt.xlabel("Sample index (filtered, common range)")
+plt.ylabel("Absolute error |pred - actual|")
+plt.title("Smoothed Absolute Error Across Models (IQR outliers removed)")
+plt.grid(alpha=0.25)
+plt.legend(loc="upper right", fontsize=8)
 plt.tight_layout()
 plt.show()
 
-# 3) Global RMSE / MAE figure
-plt.figure(figsize=(10, 4))
-plt.axhline(rmse, color="red", linestyle="--", label=f"RMSE = {rmse:.3f}")
-plt.axhline(mae, color="green", linestyle="--", label=f"MAE = {mae:.3f}")
-plt.xlabel("Sample index (filtered)")
-plt.ylabel("Error")
-plt.title(f"Global RMSE / MAE for {pred_col} (outliers removed)")
-plt.legend()
-plt.grid(True)
+# ---------- Figure 2: per-sample RMSE ----------
+plt.figure(figsize=(12, 6))
+for i, (name, curve) in enumerate(zip(model_names, all_rmse_curves)):
+    if curve is None:
+        continue
+    y = curve[:common_len]
+    if is_effnet(name):
+        plt.plot(x, y, color="tab:red", linewidth=2.5,
+                 label=name + " (EffNet)", zorder=3)
+    else:
+        plt.plot(x, y, color=colors[i], linewidth=1.2, alpha=0.35,
+                 label=name, zorder=1)
+
+plt.xlabel("Sample index (filtered, common range)")
+plt.ylabel("Per-sample RMSE")
+plt.title("Smoothed RMSE Across Models (IQR outliers removed, EffNet highlighted)")
+plt.grid(alpha=0.25)
+plt.legend(loc="upper right", fontsize=8)
 plt.tight_layout()
 plt.show()
 
-# 4) NEW: High Error Indicator (>200% error)
-plt.figure(figsize=(12, 4))
-high_error_mask = pct_err_f > 200  # True if % error > 200%
-plt.plot(x, high_error_mask.astype(int), marker='o', markersize=4, linewidth=2, 
-         label="High Error", color='red', alpha=0.8)
-plt.xlabel("Sample index (filtered)")
-plt.ylabel("High Error Flag")
-plt.title(f"High Error Detectionfor {pred_col}\n"
-          f"High error samples: {high_error_mask.sum()}/{len(high_error_mask)} ({100*high_error_mask.mean():.1f}%)")
-plt.grid(True, alpha=0.3)
-plt.yticks([0, 1], ['False', 'True'])
-plt.legend()
+# ---------- Figure 3: percentage MAE (|% error|) ----------
+plt.figure(figsize=(12, 6))
+for i, (name, curve) in enumerate(zip(model_names, all_pct_curves)):
+    if curve is None:
+        continue
+    y = curve[:common_len]
+    if is_effnet(name):
+        plt.plot(x, y, color="tab:red", linewidth=2.5,
+                 label=name + " (EffNet)", zorder=3)
+    else:
+        plt.plot(x, y, color=colors[i], linewidth=1.2, alpha=0.35,
+                 label=name, zorder=1)
+
+plt.xlabel("Sample index (filtered, common range)")
+plt.ylabel("Absolute percentage error (%)")
+plt.title("Smoothed %MAE Across Models (IQR outliers removed, EffNet highlighted)")
+plt.grid(alpha=0.25)
+plt.legend(loc="upper right", fontsize=8)
 plt.tight_layout()
 plt.show()
-
-# Print summary
-print(f"\nHigh error (>200%) summary for {pred_col}:")
-print(f"  Total high error samples: {high_error_mask.sum()}")
-print(f"  Percentage: {100*high_error_mask.mean():.1f}%")
-print(f"  High error indices (first 10): {np.where(high_error_mask)[0][:10]}")
