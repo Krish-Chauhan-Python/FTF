@@ -100,12 +100,21 @@ class ResNetRegressor(nn.Module):
         in_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(in_features, 512),
+            nn.Linear(in_features, 1024),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(512, 128),
+            nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
         )
 
     def forward(self, x):
