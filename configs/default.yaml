@@ -1,0 +1,30 @@
+training:
+  optimizer: adam
+  learning_rate: 1.0e-4
+  batch_size: 256
+  loss: mse
+  epochs: 25
+  seed: 42
+  dropout: 0.3
+  val_split: 0.2
+
+data:
+  frame_stride: 25      # 1 frame per 25 (≈0.83s at 30fps)
+  image_size: 224
+  augmentation:
+    horizontal_flip: true
+    color_jitter:
+      brightness: 0.2
+      contrast: 0.2
+
+yolo:
+  conf_threshold: 0.75
+  nms_iou_threshold: 0.75
+  imgsz: 640
+
+resnet_extended:        # Extended recipe for ResNet-25e
+  optimizer: adamw
+  weight_decay: 1.0e-4
+  scheduler: cosine_annealing
+  scheduler_t_max: 10
+  dropout: 0.4
